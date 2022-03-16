@@ -1,57 +1,73 @@
 import sys
 
-from BaseFunction import BaseFunction, HingeFunctionBaseFunction
-from MARSModel import MARSModel
+from BaseFunction import BaseFunction, HingeFunctionBaseFunction, HingeFunctionProductBaseFunction
+from MARSModel import MARSModel, MARSModelTerm, Operator
 
-from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_squared_error
+import statsmodels.api as sm
+
 import numpy as np
 
 MAXVAL = sys.maxsize
 
 
-def runMARS(self, X, y, n, r, maxSplits):
-    model = MARSModel(computeIntercept(X))
+def runMARS(self, X, y, labels, n, maxSplits):
+    model = MARSModel(1.0)
 
-    for M in range(1, maxSplits, 2):
+    for M in range(2, maxSplits, 2):
         lof_ = MAXVAL
         m_ = None
         v_ = None
         t_ = None
-        G = np.zeros(M+1, r)
-        for m in range(1, M - 1):  # For all existing terms
-            for v in range(1, n):  # For all vars
-                rows = check_nonzero(model.get_component(m), X[v], r)
-                for j in rows:  # For all values of current var where basis func evals positive
-                    t = X[v][j]
-                    G[M] = [model.get_component(m).get_function().getvalue(X) * max(0, (k - t)) for k in X[v]]
-                    G[M+1][t] = [model.get_component(m).get_function().getvalue(X) * max(0, (t - k)) for k in X[v]]
+        for m in range(0, M):  # For all existing terms
+            basefunc = model.get_component(m).get_function()
+            varsinbasefunc = basefunc.getVariables()
+            allvars = np.arange(n)
+            allvars -= varsinbasefunc
+            for v in allvars:  # For all suitable vars
+                ts = check_nonzero(basefunc, X, n, v)
+                for t in ts:  # For all suitable values of vars
+                    newbasisFunctionPos = HingeFunctionBaseFunction(t, v, labels[v], True)
+                    newbasisFunctionNeg = HingeFunctionBaseFunction(t, v, labels[v], False)
+                    prodpos = HingeFunctionProductBaseFunction([basefunc, newbasisFunctionPos])
+                    prodneg = HingeFunctionProductBaseFunction([basefunc, newbasisFunctionNeg])
 
-        #Regress
-        g: LinearRegression = LinearRegression()
-        g.fit(G, y)
-        #Get coeffecients and compute squared-error loss for all sub-models
-        beta = g.coef_
-        y_hat = G * beta
-        lof = mean_squared_error(y, y_hat)
-        #Add to model
+                    posterm = MARSModelTerm(prodpos, 0.0, Operator.POS)
+                    negterm = MARSModelTerm(prodneg, 0.0, Operator.NEG)
+                    newmodel = model.copy()
+                    newmodel.add_component(posterm)
+                    newmodel.add_component(negterm)
+
+                    g = sm.OLS(y, newmodel.getRegressable(X)).fit()
+                    if g.ssr < lof_:
+                        lof_ = g.ssr
+                        m_ = m
+                        v_ = v
+                        t_ = t
+
+        # Add new terms to model
+        basefunc = model.get_component(m_).get_function()
+        newbasisFunctionPos = HingeFunctionBaseFunction(t_, v_, labels[v_], True)
+        newbasisFunctionNeg = HingeFunctionBaseFunction(t_, v_, labels[v_], False)
+        prodpos = HingeFunctionProductBaseFunction([basefunc, newbasisFunctionPos])
+        prodneg = HingeFunctionProductBaseFunction([basefunc, newbasisFunctionNeg])
+        posterm = MARSModelTerm(prodpos, 0.0, Operator.POS)
+        negterm = MARSModelTerm(prodneg, 0.0, Operator.NEG)
+        model.add_component(posterm)
+        model.add_component(negterm)
+
+    return model
 
 
-        comp1 =model.get_component(m_)
+def check_nonzero(func: BaseFunction, X, n, v):
+    values = []
 
+    evalvalues = []
+    varia = func.getVariables()
+    for j in range(0, len(X[0])):
+        for var in varia:
+            evalvalues.append(X[var][j])
 
+        if func.getvalue(evalvalues) > 0:
+            values.append(X[v][j])
 
-def LOF(g):
-    return 0
-
-def check_nonzero(func: BaseFunction, v, r):
-    indices = []
-    for i in range(0, r):
-        if func.getvalue(v[i]) > 0:
-            indices.append(i)
-
-    return indices
-
-
-def computeIntercept(X):
-    return 1.0
+    return values
