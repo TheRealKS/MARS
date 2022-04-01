@@ -30,17 +30,11 @@ def runMARSForward(X, y, labels, n, maxSplits):
                 ts = check_nonzero(basefunc, X, v)
                 its = 0
                 for t in ts:  # For all suitable values of vars
-                    # Generate candidate pairs
-                    newbasisFunctionPos = HingeFunctionBaseFunction(t, v, labels[v], True)
-                    newbasisFunctionNeg = HingeFunctionBaseFunction(t, v, labels[v], False)
-                    prodpos = HingeFunctionProductBaseFunction([basefunc, newbasisFunctionPos])
-                    prodneg = HingeFunctionProductBaseFunction([basefunc, newbasisFunctionNeg])
-
-                    posterm = MARSModelTerm(prodpos, 0.0, Operator.POS)
-                    negterm = MARSModelTerm(prodneg, 0.0, Operator.POS)
+                    # Generate candidate pairs and candidate model
+                    p, n = generateCandidatePairs(basefunc, t, v, labels)
                     newmodel = model.copy()
-                    newmodel.add_component(posterm)
-                    newmodel.add_component(negterm)
+                    newmodel.add_component(p)
+                    newmodel.add_component(n)
 
                     logging.info(
                         "Running regression for M=" + str(M) + ", m=" + str(m) + ", v=" + labels[v] + ", value " +
@@ -58,14 +52,9 @@ def runMARSForward(X, y, labels, n, maxSplits):
 
         # Add new terms to model
         basefunc = model.get_component(m_).get_function()
-        newbasisFunctionPos = HingeFunctionBaseFunction(t_, v_, labels[v_], True)
-        newbasisFunctionNeg = HingeFunctionBaseFunction(t_, v_, labels[v_], False)
-        prodpos = HingeFunctionProductBaseFunction([basefunc, newbasisFunctionPos])
-        prodneg = HingeFunctionProductBaseFunction([basefunc, newbasisFunctionNeg])
-        posterm = MARSModelTerm(prodpos, 0.0, Operator.POS)
-        negterm = MARSModelTerm(prodneg, 0.0, Operator.POS)
-        model.add_component(posterm)
-        model.add_component(negterm)
+        p_, n_ = generateCandidatePairs(basefunc, t_, v_, labels[v_])
+        model.add_component(p_)
+        model.add_component(n_)
 
     # Compute the final coefficients
     g = sm.OLS(y, model.getRegressable(X)).fit()
@@ -75,6 +64,18 @@ def runMARSForward(X, y, labels, n, maxSplits):
 
 def runMARSBackward(model: MARSModel, X, y, n):
     raise NotImplementedError()
+
+
+def generateCandidatePairs(parent, t, v, labels):
+    newbasisFunctionPos = HingeFunctionBaseFunction(t, v, labels[v], True)
+    newbasisFunctionNeg = HingeFunctionBaseFunction(t, v, labels[v], False)
+    prodpos = HingeFunctionProductBaseFunction([parent, newbasisFunctionPos])
+    prodneg = HingeFunctionProductBaseFunction([parent, newbasisFunctionNeg])
+
+    posterm = MARSModelTerm(prodpos, 0.0, Operator.POS)
+    negterm = MARSModelTerm(prodneg, 0.0, Operator.POS)
+
+    return posterm, negterm
 
 
 def check_nonzero(func: BaseFunction, X, v):
