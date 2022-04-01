@@ -1,5 +1,6 @@
 import enum
 from typing import List
+import numpy as np
 
 from BaseFunction import BaseFunction, ConstantBaseFunction
 
@@ -18,58 +19,59 @@ class MARSModelTerm:
     def eval(self, x):
         return self.op.value * (self.coef * self.func.getvalue(x))
 
-    def get_coefficient(self):
-        return self.coef
-
     def get_function(self):
         return self.func
 
     def __str__(self):
+        if self.func.type == 1:
+            return self.func.getvalue([])
         if self.op == Operator.POS:
             return "+ " + str(self.coef) + str(self.func)
         else:
-            return "- " + str(self.coef) + str(self.func)
+            coefstr = str(self.coef)[1:]
+            return "- " + coefstr + str(self.func)
 
 
 class MARSModel:
     components: List[MARSModelTerm] = []
 
-    def __init__(self, intercept: float = 1.0):
-        self.components.append(MARSModelTerm(ConstantBaseFunction(), intercept, Operator.POS))
+    def __init__(self, intercept: float = 1.0, empty = False):
+        if not empty:
+            self.components.append(MARSModelTerm(ConstantBaseFunction(), intercept, Operator.POS))
 
     def add_component(self, component: MARSModelTerm):
         self.components.append(component)
-
-    def set_component(self, i, newcomponent: MARSModelTerm):
-        self.components[i] = newcomponent
 
     def get_component(self, i):
         return self.components[i]
 
     def set_coefficients(self, coef):
-        for i in range(0, len(self.components)):
+        for i in range(1, len(self.components)):
             self.components[i].coef = coef[i]
+            if coef[i] < 0:
+                self.components[i].op = Operator.NEG
 
-    def getRegressable(self, X):
+    def getRegressable(self, X: np.ndarray):
         regressable = []
         row = []
-        for j in range(0, len(X[0])):
+        for j in range(0, X.shape[0]):
             for i in range(0, len(self.components)):
                 func = self.components[i].get_function()
-                evalvalues = []
+                evalvalues = {}
                 varia = func.getVariables()
                 for var in varia:
-                    evalvalues.append(X[var][j])
-                row.append(func.getvalue(evalvalues))
+                    evalvalues[var] = X[j][var]
+                fval = func.getvalue(evalvalues)
+                row.append(fval)
             regressable.append(row)
             row = []
 
         return regressable
 
     def copy(self):
-        c = MARSModel()
-        c.components = self.components.copy()
-        return c
+        newmodel = MARSModel(empty=True)
+        newmodel.components = self.components.copy()
+        return newmodel
 
     def __str__(self):
         stringbuilder = str(self.components[0].eval(0)) + " "

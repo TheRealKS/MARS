@@ -1,5 +1,7 @@
 import sys
 
+import logging
+
 from BaseFunction import BaseFunction, HingeFunctionBaseFunction, HingeFunctionProductBaseFunction
 from MARSModel import MARSModel, MARSModelTerm, Operator
 
@@ -10,10 +12,11 @@ import numpy as np
 MAXVAL = sys.maxsize
 
 
-def runMARS(self, X, y, labels, n, maxSplits):
+def runMARSForward(X, y, labels, n, maxSplits):
     model = MARSModel(1.0)
+    logging.info("Starting iteration with " + str(n) + "vars..")
 
-    for M in range(2, maxSplits, 2):
+    for M in range(1, maxSplits + 1, 2):
         lof_ = MAXVAL
         m_ = None
         v_ = None
@@ -21,28 +24,37 @@ def runMARS(self, X, y, labels, n, maxSplits):
         for m in range(0, M):  # For all existing terms
             basefunc = model.get_component(m).get_function()
             varsinbasefunc = basefunc.getVariables()
-            allvars = np.arange(n)
-            allvars -= varsinbasefunc
+            allvars = set(np.arange(n))
+            allvars = allvars.difference(varsinbasefunc)
             for v in allvars:  # For all suitable vars
-                ts = check_nonzero(basefunc, X, n, v)
+                ts = check_nonzero(basefunc, X, v)
+                its = 0
                 for t in ts:  # For all suitable values of vars
+                    # Generate candidate pairs
                     newbasisFunctionPos = HingeFunctionBaseFunction(t, v, labels[v], True)
                     newbasisFunctionNeg = HingeFunctionBaseFunction(t, v, labels[v], False)
                     prodpos = HingeFunctionProductBaseFunction([basefunc, newbasisFunctionPos])
                     prodneg = HingeFunctionProductBaseFunction([basefunc, newbasisFunctionNeg])
 
                     posterm = MARSModelTerm(prodpos, 0.0, Operator.POS)
-                    negterm = MARSModelTerm(prodneg, 0.0, Operator.NEG)
+                    negterm = MARSModelTerm(prodneg, 0.0, Operator.POS)
                     newmodel = model.copy()
                     newmodel.add_component(posterm)
                     newmodel.add_component(negterm)
 
-                    g = sm.OLS(y, newmodel.getRegressable(X)).fit()
+                    logging.info(
+                        "Running regression for M=" + str(M) + ", m=" + str(m) + ", v=" + labels[v] + ", value " +
+                        str(its) + "...")
+
+                    # Evaluate using SSE
+                    reg = newmodel.getRegressable(X)
+                    g = sm.OLS(y, reg).fit()
                     if g.ssr < lof_:
                         lof_ = g.ssr
                         m_ = m
                         v_ = v
                         t_ = t
+                    its += 1
 
         # Add new terms to model
         basefunc = model.get_component(m_).get_function()
@@ -51,23 +63,30 @@ def runMARS(self, X, y, labels, n, maxSplits):
         prodpos = HingeFunctionProductBaseFunction([basefunc, newbasisFunctionPos])
         prodneg = HingeFunctionProductBaseFunction([basefunc, newbasisFunctionNeg])
         posterm = MARSModelTerm(prodpos, 0.0, Operator.POS)
-        negterm = MARSModelTerm(prodneg, 0.0, Operator.NEG)
+        negterm = MARSModelTerm(prodneg, 0.0, Operator.POS)
         model.add_component(posterm)
         model.add_component(negterm)
 
+    # Compute the final coefficients
+    g = sm.OLS(y, model.getRegressable(X)).fit()
+    model.set_coefficients(g.params)
     return model
 
 
-def check_nonzero(func: BaseFunction, X, n, v):
+def runMARSBackward(model: MARSModel, X, y, n):
+    raise NotImplementedError()
+
+
+def check_nonzero(func: BaseFunction, X, v):
     values = []
 
-    evalvalues = []
     varia = func.getVariables()
-    for j in range(0, len(X[0])):
+    for j in range(0, X.shape[0]):
+        evalvalues = {}
         for var in varia:
-            evalvalues.append(X[var][j])
+            evalvalues[var] = X[j][var]
 
         if func.getvalue(evalvalues) > 0:
-            values.append(X[v][j])
+            values.append(X[j][v])
 
     return values
