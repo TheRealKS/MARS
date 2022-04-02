@@ -1,8 +1,8 @@
 import enum
-from typing import List
+from typing import List, Dict
 import numpy as np
 
-from BaseFunction import BaseFunction, ConstantBaseFunction
+from BaseFunction import BaseFunction, ConstantBaseFunction, HingeFunctionProductBaseFunction
 
 
 class Operator(enum.Enum):
@@ -37,7 +37,7 @@ class MARSModel:
 
     def __init__(self, intercept: float = 1.0, empty = False):
         if not empty:
-            self.components.append(MARSModelTerm(ConstantBaseFunction(), intercept, Operator.POS))
+            self.components.append(MARSModelTerm(ConstantBaseFunction(intercept), 1.0, Operator.POS))
 
     def add_component(self, component: MARSModelTerm):
         self.components.append(component)
@@ -45,11 +45,19 @@ class MARSModel:
     def get_component(self, i):
         return self.components[i]
 
+    def remove_component(self, i):
+        del self.components[i]
+
     def set_coefficients(self, coef):
         for i in range(1, len(self.components)):
             self.components[i].coef = coef[i]
             if coef[i] < 0:
                 self.components[i].op = Operator.NEG
+
+    def eval(self, x):
+        i = 0
+        for c in self.components:
+            i += c.eval(x)
 
     def getRegressable(self, X: np.ndarray):
         regressable = []
@@ -68,10 +76,33 @@ class MARSModel:
 
         return regressable
 
+    def getRegressableNewComponents(self, X: np.ndarray, newcomponents=None):
+        if newcomponents is None:
+            newcomponents = []
+
+        regressable = []
+        row = []
+        for j in range(0, X.shape[0]):
+            for c in newcomponents:
+                evalvalues = {}
+                varia = c.getVariables()
+                for var in varia:
+                    evalvalues[var] = X[j][var]
+                fval = c.getvalue(evalvalues)
+                row.append(fval)
+
+            regressable.append(row)
+            row = []
+
+        return regressable
+
     def copy(self):
         newmodel = MARSModel(empty=True)
         newmodel.components = self.components.copy()
         return newmodel
+
+    def length(self):
+        return len(self.components)
 
     def __str__(self):
         stringbuilder = str(self.components[0].eval(0)) + " "

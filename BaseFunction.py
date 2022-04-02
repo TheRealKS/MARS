@@ -17,9 +17,9 @@ class BaseFunction:
 
 
 class ConstantBaseFunction(BaseFunction):
-    def __init__(self):
+    def __init__(self, value = 1.0):
         super().__init__()
-        self.value = 1.0
+        self.value = value
         self.type = 1
 
     def getvalue(self, x):
