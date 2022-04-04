@@ -6,12 +6,13 @@ import logging
 from BaseFunction import BaseFunction, HingeFunctionBaseFunction, HingeFunctionProductBaseFunction
 from MARSModel import MARSModel, MARSModelTerm, Operator
 
-import statsmodels.api as sm
+from sklearnex import patch_sklearn
+patch_sklearn()
+from sklearn.linear_model import LinearRegression
 
 import numpy as np
 
 MAXVAL = sys.maxsize
-PENALTY = 3
 nonzero_store = dict()
 
 def runMARSForward(X, y, labels, n, maxSplits):
@@ -24,30 +25,33 @@ def runMARSForward(X, y, labels, n, maxSplits):
         m_ = None
         v_ = None
         t_ = None
-        current_regressable = np.array(model.getRegressable(X))
+        model.getRegressable(X)
         for m in range(0, M):  # For all existing terms
             logging.warning("Term " + str(m))
             basefunc = model.get_component(m).get_function()
             varsnotinbasefunc = set(np.arange(n)).difference(basefunc.getVariables())
             for v in varsnotinbasefunc:  # For all suitable vars
                 logging.warning("Var " + labels[v])
-                ts = check_nonzero(basefunc, X, v)
+                if (m != 0):
+                    ts = check_nonzero(basefunc, X, v)
+                else:
+                    ts = X[:][v]
                 its = 0
                 for t in ts:  # For all suitable values of vars
-                    newbasisFunctionPos = HingeFunctionBaseFunction(t, v, labels[v], True)
-                    newbasisFunctionNeg = HingeFunctionBaseFunction(t, v, labels[v], False)
-                    prodpos = HingeFunctionProductBaseFunction([basefunc, newbasisFunctionPos])
-                    prodneg = HingeFunctionProductBaseFunction([basefunc, newbasisFunctionNeg])
+                    prodpos = HingeFunctionBaseFunction(t, v, labels[v], True)
+                    prodneg = HingeFunctionBaseFunction(t, v, labels[v], False)
+                    if m != 0:
+                        prodpos = HingeFunctionProductBaseFunction([basefunc, prodpos])
+                        prodneg = HingeFunctionProductBaseFunction([basefunc, prodneg])
 
-                    #logging.info(
-                    #    "Running regression for M=" + str(M) + ", m=" + str(m) + ", v=" + labels[v] + ", value " +
-                    #    str(its) + "...")
+                    logging.warning(
+                        "Running regression for M=" + str(M) + ", m=" + str(m) + ", v=" + labels[v] + ", value " +
+                        str(its) + "...")
 
                     # Evaluate using SSE
-                    reg = np.array(model.getRegressableNewComponents(X, [prodpos, prodneg]))
-                    newreg = np.concatenate((current_regressable, reg), axis=1)
-                    g = sm.OLS(y, newreg).fit()
-                    lof = g.ssr
+                    reg = model.getRegressableNewComponents(X, [prodpos, prodneg])
+                    lr = pinv
+                    lof = ((y - lr.predict(reg)**2)).sum()
                     if lof < lof_:
                         lof_ = lof
                         m_ = m
@@ -67,10 +71,10 @@ def runMARSForward(X, y, labels, n, maxSplits):
     return model, g.ssr
 
 
-def runMARSBackward(model: MARSModel, modelrss, X, y, n, maxSplits):
+def runMARSBackward(model: MARSModel, modelrss, X, y, n, maxSplits, d = 3):
     J = model
     K = model.copy()
-    currentgcv = GCV(modelrss, n, model.length())
+    currentgcv = GCV(modelrss, n, model.length(), d)
     print(currentgcv)
     for M in reversed(range(1, maxSplits)):
         b = MAXVAL
@@ -79,7 +83,7 @@ def runMARSBackward(model: MARSModel, modelrss, X, y, n, maxSplits):
             KK = L.copy()
             KK.remove_component(m)
             g = sm.OLS(y, KK.getRegressable(X)).fit()
-            submodelgcv = GCV(g.ssr, n, KK.length())
+            submodelgcv = GCV(g.ssr, n, KK.length(), d)
             print(submodelgcv)
             if submodelgcv < b:
                 b = submodelgcv
@@ -91,20 +95,21 @@ def runMARSBackward(model: MARSModel, modelrss, X, y, n, maxSplits):
     return J
 
 def generateCandidatePairs(parent, t, v, label):
-    newbasisFunctionPos = HingeFunctionBaseFunction(t, v, label, True)
-    newbasisFunctionNeg = HingeFunctionBaseFunction(t, v, label, False)
-    prodpos = HingeFunctionProductBaseFunction([parent, newbasisFunctionPos])
-    prodneg = HingeFunctionProductBaseFunction([parent, newbasisFunctionNeg])
+    prodpos = HingeFunctionBaseFunction(t, v, label, True)
+    prodneg = HingeFunctionBaseFunction(t, v, label, False)
+    if (parent.type > 1):
+        prodpos = HingeFunctionProductBaseFunction([parent, prodpos])
+        prodneg = HingeFunctionProductBaseFunction([parent, prodneg])
 
     posterm = MARSModelTerm(prodpos, 0.0, Operator.POS)
     negterm = MARSModelTerm(prodneg, 0.0, Operator.POS)
 
     return posterm, negterm
 
-def GCV(ssr, n, M):
-    effectiveparams = M + PENALTY * (M - 1) / 2
+def GCV(ssr, n, M, d):
+    effectiveparams = M + d * (M - 1) / 2
     t = (1 - (effectiveparams / n))
-    gcv = ssr / (n * math.pow(t, 2))
+    gcv = ssr / (math.pow(t, 2))
     return gcv
 
 def check_nonzero(func: BaseFunction, X, v):

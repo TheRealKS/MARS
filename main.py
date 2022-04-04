@@ -19,6 +19,8 @@ def main():
     X = df['X'].to_numpy()
     y = df['y'].to_numpy()
     X = np.array(list(map(np.array, X)))
+    X = X[:1000]
+    y = y[:1000]
     labels = gen_labels(len(X[0]))
     model, ssr = runMARSForward(X, y, labels, len(X[0]), maxSplits=10)
     with open("model.pickle", "wb") as outfile:

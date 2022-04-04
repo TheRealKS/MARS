@@ -36,6 +36,7 @@ class MARSModel:
     components: List[MARSModelTerm] = []
 
     def __init__(self, intercept: float = 1.0, empty = False):
+        self.reg = []
         if not empty:
             self.components.append(MARSModelTerm(ConstantBaseFunction(intercept), 1.0, Operator.POS))
 
@@ -74,14 +75,14 @@ class MARSModel:
             regressable.append(row)
             row = []
 
-        return regressable
+        self.reg = regressable
+        return np.array(self.reg)
 
     def getRegressableNewComponents(self, X: np.ndarray, newcomponents=None):
         if newcomponents is None:
             newcomponents = []
 
-        regressable = []
-        row = []
+        regressable = self.reg.copy()
         for j in range(0, X.shape[0]):
             for c in newcomponents:
                 evalvalues = {}
@@ -89,12 +90,9 @@ class MARSModel:
                 for var in varia:
                     evalvalues[var] = X[j][var]
                 fval = c.getvalue(evalvalues)
-                row.append(fval)
+                regressable[j].append(fval)
 
-            regressable.append(row)
-            row = []
-
-        return regressable
+        return np.array(regressable)
 
     def copy(self):
         newmodel = MARSModel(empty=True)
