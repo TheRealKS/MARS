@@ -19,10 +19,10 @@ def main():
     X = df['X'].to_numpy()
     y = df['y'].to_numpy()
     X = np.array(list(map(np.array, X)))
-    X = X[:1000]
-    y = y[:1000]
+    X = X[:500]
+    y = y[:500]
     labels = gen_labels(len(X[0]))
-    model, ssr = runMARSForward(X, y, labels, len(X[0]), maxSplits=10)
+    model, ssr = runMARSForward(X, y, labels, len(X[0]), maxSplits=15)
     with open("model.pickle", "wb") as outfile:
         # "wb" argument opens the file in binary mode
         print(model)

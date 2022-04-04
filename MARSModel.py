@@ -24,7 +24,7 @@ class MARSModelTerm:
 
     def __str__(self):
         if self.func.type == 1:
-            return self.func.getvalue([])
+            return str(self.func.getvalue([]))
         if self.op == Operator.POS:
             return "+ " + str(self.coef) + str(self.func)
         else:
@@ -82,17 +82,19 @@ class MARSModel:
         if newcomponents is None:
             newcomponents = []
 
-        regressable = self.reg.copy()
+        regressable = []
         for j in range(0, X.shape[0]):
+            row = []
             for c in newcomponents:
                 evalvalues = {}
                 varia = c.getVariables()
                 for var in varia:
                     evalvalues[var] = X[j][var]
                 fval = c.getvalue(evalvalues)
-                regressable[j].append(fval)
+                row.append(fval)
+            regressable.append(row)
 
-        return np.array(regressable)
+        return np.concatenate((self.reg, regressable), axis=1)
 
     def copy(self):
         newmodel = MARSModel(empty=True)

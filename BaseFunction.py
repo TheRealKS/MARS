@@ -68,17 +68,12 @@ class HingeFunctionProductBaseFunction(BaseFunction):
         self.type = 3
 
     def getvalue(self, x: Dict[int, int]):
-        varsrequired = len(self.getVariables())
-        if len(x) != varsrequired:
-            raise RuntimeError("Number of X values should be equal to number of hinge functions in product")
-
         v = 1
         for hinge in self.hinges:
             if hinge.type == 2:
                 v *= hinge.getvalue(x)
             elif hinge.type == 3:
-                hinge_values = {v: x[v] for v in hinge.getVariables()}
-                v *= hinge.getvalue(hinge_values)
+                v *= hinge.getvalue(x)
             else:
                 v *= hinge.getvalue(None)
 

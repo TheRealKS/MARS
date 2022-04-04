@@ -6,9 +6,7 @@ import logging
 from BaseFunction import BaseFunction, HingeFunctionBaseFunction, HingeFunctionProductBaseFunction
 from MARSModel import MARSModel, MARSModelTerm, Operator
 
-from sklearnex import patch_sklearn
-patch_sklearn()
-from sklearn.linear_model import LinearRegression
+import statsmodels.api as sm
 
 import numpy as np
 
@@ -19,9 +17,9 @@ def runMARSForward(X, y, labels, n, maxSplits):
     model = MARSModel()
     logging.warning("Starting iteration with " + str(n) + "vars..")
 
+    lof_ = MAXVAL
     for M in range(1, maxSplits, 2):
         logging.warning("Split " + str(M))
-        lof_ = MAXVAL
         m_ = None
         v_ = None
         t_ = None
@@ -31,11 +29,11 @@ def runMARSForward(X, y, labels, n, maxSplits):
             basefunc = model.get_component(m).get_function()
             varsnotinbasefunc = set(np.arange(n)).difference(basefunc.getVariables())
             for v in varsnotinbasefunc:  # For all suitable vars
-                logging.warning("Var " + labels[v])
-                if (m != 0):
+                #logging.warning("Var " + labels[v])
+                if m != 0:
                     ts = check_nonzero(basefunc, X, v)
                 else:
-                    ts = X[:][v]
+                    ts = X[:, v]
                 its = 0
                 for t in ts:  # For all suitable values of vars
                     prodpos = HingeFunctionBaseFunction(t, v, labels[v], True)
@@ -44,14 +42,13 @@ def runMARSForward(X, y, labels, n, maxSplits):
                         prodpos = HingeFunctionProductBaseFunction([basefunc, prodpos])
                         prodneg = HingeFunctionProductBaseFunction([basefunc, prodneg])
 
-                    logging.warning(
-                        "Running regression for M=" + str(M) + ", m=" + str(m) + ", v=" + labels[v] + ", value " +
-                        str(its) + "...")
+                    #logging.warning(
+                    #    "Running regression for M=" + str(M) + ", m=" + str(m) + ", v=" + labels[v] + ", value " +
+                    #    str(its) + "...")
 
                     # Evaluate using SSE
                     reg = model.getRegressableNewComponents(X, [prodpos, prodneg])
-                    lr = pinv
-                    lof = ((y - lr.predict(reg)**2)).sum()
+                    lof, _ = ssr(reg, y)
                     if lof < lof_:
                         lof_ = lof
                         m_ = m
@@ -66,31 +63,34 @@ def runMARSForward(X, y, labels, n, maxSplits):
         model.add_component(neg_)
 
     # Compute the final coefficients
-    g = sm.OLS(y, model.getRegressable(X)).fit()
-    model.set_coefficients(g.params)
-    return model, g.ssr
+    reg = model.getRegressable(X)
+    _, b = ssr(reg, y)
+    model.set_coefficients(b)
+    return model, lof_
 
 
 def runMARSBackward(model: MARSModel, modelrss, X, y, n, maxSplits, d = 3):
+    logging.warning("Running backward MARS now...")
     J = model
     K = model.copy()
     currentgcv = GCV(modelrss, n, model.length(), d)
     print(currentgcv)
     for M in reversed(range(1, maxSplits)):
-        b = MAXVAL
+        lof_ = MAXVAL
         L = K.copy()
         for m in range(1, M):
             KK = L.copy()
             KK.remove_component(m)
-            g = sm.OLS(y, KK.getRegressable(X)).fit()
-            submodelgcv = GCV(g.ssr, n, KK.length(), d)
-            print(submodelgcv)
-            if submodelgcv < b:
-                b = submodelgcv
+            lof, b = ssr(KK.getRegressable(X), y)
+            submodelgcv = GCV(lof, n, KK.length(), d)
+            if submodelgcv < lof_:
+                lof_ = submodelgcv
                 K = KK.copy()
             if submodelgcv < currentgcv:
+                print(submodelgcv)
                 currentgcv = submodelgcv
                 J = KK.copy()
+                J.set_coefficients(b)
 
     return J
 
@@ -106,10 +106,17 @@ def generateCandidatePairs(parent, t, v, label):
 
     return posterm, negterm
 
+def ssr(reg, y):
+    b = np.linalg.pinv(reg).dot(y)
+    b[0] = 1.0
+    pred = reg.dot(b)
+    lof = np.sum(np.power(pred - y, 2))
+    return lof, b
+
 def GCV(ssr, n, M, d):
-    effectiveparams = M + d * (M - 1) / 2
+    effectiveparams = M + d * (M - 1)
     t = (1 - (effectiveparams / n))
-    gcv = ssr / (math.pow(t, 2))
+    gcv = (ssr / n) / math.pow(t, 2)
     return gcv
 
 def check_nonzero(func: BaseFunction, X, v):
