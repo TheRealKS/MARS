@@ -2,137 +2,127 @@ import math
 import sys
 
 import logging
+import copy
 
-from BaseFunction import BaseFunction, HingeFunctionBaseFunction, HingeFunctionProductBaseFunction
-from MARSModel import MARSModel, MARSModelTerm, Operator
-
-import statsmodels.api as sm
+from MARSModel import *
+from sklearn.linear_model import LinearRegression
 
 import numpy as np
 
 MAXVAL = sys.maxsize
-nonzero_store = dict()
 
-def runMARSForward(X, y, labels, n, maxSplits):
-    model = MARSModel()
+
+def runMARSForward(X, y, labels, maxSplits):
+    model = generateEmptyMarsModel()
+    n = len(labels)
     logging.warning("Starting iteration with " + str(n) + "vars..")
 
-    lof_ = MAXVAL
     for M in range(1, maxSplits, 2):
         logging.warning("Split " + str(M))
         m_ = None
         v_ = None
         t_ = None
-        model.getRegressable(X)
+        lof_ = MAXVAL
         for m in range(0, M):  # For all existing terms
             logging.warning("Term " + str(m))
-            basefunc = model.get_component(m).get_function()
-            varsnotinbasefunc = set(np.arange(n)).difference(basefunc.getVariables())
+            currentterm = model[m]
+            varsinbasefunc = getVarsInBaseFunc(currentterm)
+            varsnotinbasefunc = set(labels).difference(np.array(varsinbasefunc).flatten())
             for v in varsnotinbasefunc:  # For all suitable vars
-                #logging.warning("Var " + labels[v])
                 if m != 0:
-                    ts = check_nonzero(basefunc, X, v)
+                    ts = checkWhereBaseFuncNonZero(currentterm, labels.index(v), X, labels)
                 else:
-                    ts = X[:, v]
+                    ts = X[:, labels.index(v)]
                 its = 0
                 for t in ts:  # For all suitable values of vars
-                    prodpos = HingeFunctionBaseFunction(t, v, labels[v], True)
-                    prodneg = HingeFunctionBaseFunction(t, v, labels[v], False)
-                    if m != 0:
-                        prodpos = HingeFunctionProductBaseFunction([basefunc, prodpos])
-                        prodneg = HingeFunctionProductBaseFunction([basefunc, prodneg])
-
-                    #logging.warning(
-                    #    "Running regression for M=" + str(M) + ", m=" + str(m) + ", v=" + labels[v] + ", value " +
-                    #    str(its) + "...")
+                    pos = generateHingeFunction(v, t, True)
+                    neg = generateHingeFunction(v, t, False)
+                    if not currentterm[0] == 1:
+                        prodpos = [currentterm, pos]
+                        prodneg = [currentterm, neg]
+                    else:
+                        prodpos = pos
+                        prodneg = neg
 
                     # Evaluate using SSE
-                    reg = model.getRegressableNewComponents(X, [prodpos, prodneg])
-                    lof, _ = ssr(reg, y)
+                    tempmodel = model.copy()
+                    tempmodel.append(prodpos)
+                    tempmodel.append(prodneg)
+                    evaluatedModelWithCoefs = evalModelWithCoefs(tempmodel, labels, X, y)
+                    lof = ssr(evaluatedModelWithCoefs - y)
                     if lof < lof_:
                         lof_ = lof
                         m_ = m
                         v_ = v
                         t_ = t
                     its += 1
+                    # print(its)
 
         # Add new terms to model
-        basefunc = model.get_component(m_).get_function()
-        pos_, neg_ = generateCandidatePairs(basefunc, t_, v_, labels[v_])
-        model.add_component(pos_)
-        model.add_component(neg_)
+        basefunc = model[m_]
+        pos = generateHingeFunction(v_, t_, True)
+        neg = generateHingeFunction(v_, t_, False)
+        if not basefunc[0] == 1:
+            prodpos = [basefunc, pos]
+            prodneg = [basefunc, neg]
+        else:
+            prodpos = pos
+            prodneg = neg
+        model.append(prodpos)
+        model.append(prodneg)
 
     # Compute the final coefficients
-    reg = model.getRegressable(X)
-    _, b = ssr(reg, y)
-    model.set_coefficients(b)
-    return model, lof_
+    evaluatedModelWithCoefs = evalModelWithCoefs(model, labels, X, y)
+    lof = ssr(evaluatedModelWithCoefs - y)
+    return model, lof
 
 
-def runMARSBackward(model: MARSModel, modelrss, X, y, n, maxSplits, d = 3):
+def runMARSBackward(model, modelrss, X, labels, y, n, maxSplits, d=2):
     logging.warning("Running backward MARS now...")
     J = model
-    K = model.copy()
-    currentgcv = GCV(modelrss, n, model.length(), d)
+    K = copy.deepcopy(model)
+    modellen = getModelLength(model)
+    currentgcv = GCV(modelrss, n, modellen, d)
     print(currentgcv)
     for M in reversed(range(1, maxSplits)):
         lof_ = MAXVAL
-        L = K.copy()
-        for m in range(1, M):
-            KK = L.copy()
-            KK.remove_component(m)
-            lof, b = ssr(KK.getRegressable(X), y)
-            submodelgcv = GCV(lof, n, KK.length(), d)
+        L = copy.deepcopy(K)
+        for m in range(1, getModelLength(L)):
+            KK = copy.deepcopy(L)
+            KKdeleted = removeHingeFromModel(KK, m)[0]
+            ran = evalModelWithCoefs(KKdeleted, labels, X, y)
+            lof = ssr(ran - y)
+            submodelgcv = GCV(lof, n, getModelLength(KKdeleted), d)
             if submodelgcv < lof_:
                 lof_ = submodelgcv
-                K = KK.copy()
+                K = copy.deepcopy(KKdeleted)
             if submodelgcv < currentgcv:
-                print(submodelgcv)
                 currentgcv = submodelgcv
-                J = KK.copy()
-                J.set_coefficients(b)
+                J = copy.deepcopy(KKdeleted)
 
-    return J
+    return J, getModelCoefs(J, labels, X, y)
 
-def generateCandidatePairs(parent, t, v, label):
-    prodpos = HingeFunctionBaseFunction(t, v, label, True)
-    prodneg = HingeFunctionBaseFunction(t, v, label, False)
-    if (parent.type > 1):
-        prodpos = HingeFunctionProductBaseFunction([parent, prodpos])
-        prodneg = HingeFunctionProductBaseFunction([parent, prodneg])
 
-    posterm = MARSModelTerm(prodpos, 0.0, Operator.POS)
-    negterm = MARSModelTerm(prodneg, 0.0, Operator.POS)
+def getModelCoefs(model, labels, X, y):
+    evaluatedModel = generateRegressableFunction(model, labels)(X)
+    res = LinearRegression(fit_intercept=True).fit(evaluatedModel, y)
+    return res.coef_
 
-    return posterm, negterm
 
-def ssr(reg, y):
-    b = np.linalg.pinv(reg).dot(y)
-    b[0] = 1.0
-    pred = reg.dot(b)
-    lof = np.sum(np.power(pred - y, 2))
-    return lof, b
+def evalModelWithCoefs(model, labels, X, y):
+    evaluatedModel = generateRegressableFunction(model, labels)(X)
+    res = LinearRegression(fit_intercept=True).fit(evaluatedModel, y)
+    pred = evaluateModel(model, labels, res.coef_, X)
+    return pred
+
+
+def ssr(pred):
+    lof = np.sum(np.power(pred, 2))
+    return lof
+
 
 def GCV(ssr, n, M, d):
-    effectiveparams = M + d * (M - 1)
-    t = (1 - (effectiveparams / n))
-    gcv = (ssr / n) / math.pow(t, 2)
-    return gcv
-
-def check_nonzero(func: BaseFunction, X, v):
-    if (func, v) in nonzero_store:
-        return nonzero_store[(func, v)]
-
-    values = []
-
-    varia = func.getVariables()
-    for j in range(0, X.shape[0]):
-        evalvalues = {}
-        for var in varia:
-            evalvalues[var] = X[j][var]
-
-        if func.getvalue(evalvalues) != 0:
-            values.append(X[j][v])
-
-    nonzero_store[(func, v)] = values
-    return values
+    cmhat = M + (d * (M - 1))
+    meansq = ssr / n
+    penalty = math.pow((1 - (cmhat / n)), 2)
+    return meansq / penalty
