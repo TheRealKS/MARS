@@ -10,10 +10,15 @@ import logging
 import pickle
 from sklearn.model_selection import train_test_split
 
+
 def main():
     logging.basicConfig(filename='log.txt', filemode='w', level=logging.WARNING)
     logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
+
+    # Load dataset
     weather_df = pd.read_csv('weatherHistory.csv')
+
+    # Preprocess
     weather_df.loc[weather_df['Precip Type'] == 'rain', 'Precip Type'] = 1
     weather_df.loc[weather_df['Precip Type'] == 'snow', 'Precip Type'] = 0
     weather_df_num = weather_df[list(weather_df.dtypes[weather_df.dtypes != 'object'].index)]
@@ -24,6 +29,8 @@ def main():
     train_y = train_y[:1000].to_numpy()
     labels = gen_labels(len(train_X[0]))
     maxSplits = 3
+
+    # Run mars and write intermediate steps to file
     model, ssr = runMARSForward(train_X, train_y, labels, maxSplits=maxSplits)
     with open("model_" + str(maxSplits) + ".pickle", "wb") as outfile:
         # "wb" argument opens the file in binary mode
@@ -37,7 +44,7 @@ def main():
 
     newmodel, coefs = runMARSBackward(model, ssr, train_X, labels, train_y, len(train_X), maxSplits=maxSplits)
     print(getModelLength(newmodel))
-    with open("model_aug.pickle", "wb") as outfile:
+    with open("model_" + str(maxSplits) + "_pruned.pickle", "wb") as outfile:
         # "wb" argument opens the file in binary mode
         print(model)
         d = {
@@ -47,10 +54,13 @@ def main():
         pickle.dump(d, outfile)
         print(coefs)
 
+
 def gen_labels(n):
+    """Generate some arbitrary variable labels"""
     alphabet_string = string.ascii_lowercase
     alphabet_list = list(alphabet_string)
     return alphabet_list[:n]
+
 
 if __name__ == '__main__':
     main()

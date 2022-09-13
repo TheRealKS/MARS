@@ -1,20 +1,21 @@
-import enum
-from typing import List, Dict
 import numpy as np
 import collections.abc
 
 
 def generateEmptyMarsModel(intercept=1):
+    """Generate an empty MARS model with chosen intercept value (default = 1)"""
     # Empty root node
     n = [intercept, "", 0, True]
     return [n]
 
 
 def generateHingeFunction(var, c, side):
+    """Generate a new hinge function"""
     return [0, var, c, side]
 
 
 def getModelLength(model, topdepth=None):
+    """Get length of the model counting intercept + all hinge functions. This is not the same as the number of basic functions"""
     if topdepth is None:
         topdepth = len(model)
     else:
@@ -41,6 +42,7 @@ def getModelLengthRec(term, l=0):
 
 
 def removeHingeFromModel(model, index, c=0, top=True):
+    """Remove one hinge function from the model (which may be part of a product basic function)"""
     if index == c:
         return model, c
     for m in range(0, len(model)):
@@ -61,6 +63,7 @@ def removeHingeFromModel(model, index, c=0, top=True):
 
 
 def getVarsInBaseFunc(func):
+    """Get all vars in a basic function"""
     vars = []
     if isinstance(func[0], collections.abc.Sequence):
         # This is a hinge func product
@@ -73,6 +76,7 @@ def getVarsInBaseFunc(func):
 
 
 def evaluateNonProdBaseFunc(func, valdict):
+    """Get the value for a non-product basic function (intercept or hinge function)"""
     if func[1] == "":
         # Root
         return func[0]
@@ -84,6 +88,7 @@ def evaluateNonProdBaseFunc(func, valdict):
 
 
 def evaluateBaseFunc(func, valdict):
+    """Get the value for a basic function"""
     if isinstance(func[0], collections.abc.Sequence):
         # This is a hinge func product
         val = 1
@@ -95,6 +100,7 @@ def evaluateBaseFunc(func, valdict):
 
 
 def checkWhereBaseFuncNonZero(func, currentv, X, varlabels):
+    """Find all values where a certain basic function does not evaluate to 0"""
     ts = []
     for j in range(0, X.shape[0]):
         row = X[j]
@@ -107,17 +113,9 @@ def checkWhereBaseFuncNonZero(func, currentv, X, varlabels):
     return ts
 
 
-def getRegressable(newfunc1, newfunc2, X, varlabels):
-    addtnl = []
-    for sample in X:
-        d = {varlabels[i]: sample[i] for i in range(len(sample))}
-        k = evaluateBaseFunc(newfunc1, d)
-        j = evaluateBaseFunc(newfunc2, d)
-        addtnl.append(np.array([k, j]))
-    return np.array(addtnl)
-
-
 def generateRegressableFunction(model, varlabels):
+    """Get a function which generates a data matrix that can be used to fit a regression model (to find the
+    coefficients for the MARS model) """
     def regfunc(X):
         newarr = []
         for sample in X:
@@ -135,6 +133,7 @@ def generateRegressableFunction(model, varlabels):
 
 
 def generateEvalFunction(model, varlabels):
+    """Get a function which can be used to evaluate the model for each sample in a dataset"""
     def evalfunc(coefs, X):
         newarr = []
         for sample in X:
@@ -153,5 +152,6 @@ def generateEvalFunction(model, varlabels):
 
 
 def evaluateModel(model, varlabels, coefs, X):
+    """Evaluate the model for a given dataset, using given coefficients"""
     ref = generateEvalFunction(model, varlabels)
     return ref(coefs, X)
